@@ -68,6 +68,21 @@ public final class NetModule: EyrieModule {
             refreshWiFiDetails()
         }
     }
+    /// Default-off, background-capable: warns even while the panel is closed,
+    /// so turning it on also requests Location authorization immediately
+    /// rather than waiting for `showSSID`/`showWiFiDetails` to do it later.
+    public var notifyInsecureNetwork: Bool {
+        didSet {
+            defaults.set(notifyInsecureNetwork, forKey: Self.notifyInsecureNetworkKey)
+            if notifyInsecureNetwork {
+                let provider = resolvedSSIDProvider()
+                if provider.status == .notDetermined { provider.requestAuthorization() }
+            } else {
+                hasWarnedForCurrentInsecureState = false
+            }
+            syncNotifyMonitor()
+        }
+    }
     public var showQuality: Bool {
         didSet {
             defaults.set(showQuality, forKey: Self.showQualityKey)
@@ -101,6 +116,22 @@ public final class NetModule: EyrieModule {
     @ObservationIgnored private let pinger: any Pinging
     @ObservationIgnored private var qualityTask: Task<Void, Never>?
     @ObservationIgnored private var qualityTickIndex = 0
+    /// Pinned by the registry's `setModuleEnabled(_:)` right after init, which
+    /// is also what starts the notify monitor — init deliberately doesn't,
+    /// since it cannot yet know whether the user disabled this module.
+    @ObservationIgnored private var isModuleEnabled = false
+    /// Independent of the panel's `monitorTask`: subscribes to its own fresh
+    /// path-monitor stream so insecure-network warnings keep working with the
+    /// panel closed, per `notifyInsecureNetwork`. Internal (not private), like
+    /// the other task handles above, so tests can assert on it directly.
+    @ObservationIgnored var notifyTask: Task<Void, Never>?
+    /// Edge-triggered latch: reset the moment the network stops being
+    /// insecure-without-VPN, so reconnecting to the same insecure network
+    /// warns again. Does not distinguish between two different insecure
+    /// networks back-to-back on the same interface with no offline/trusted
+    /// gap in between — an accepted limitation (`NetworkSnapshot` only
+    /// compares kind + interface name, not BSSID).
+    @ObservationIgnored private var hasWarnedForCurrentInsecureState = false
     /// Injectable so tests never write through the toggles' `didSet` into the
     /// real app's preferences.
     @ObservationIgnored private let defaults: UserDefaults
@@ -112,6 +143,7 @@ public final class NetModule: EyrieModule {
     private static let showWiFiDetailsKey = "net.showWiFiDetails"
     private static let showQualityKey = "net.showQuality"
     private static let showSecurityWarningsKey = "net.showSecurityWarnings"
+    private static let notifyInsecureNetworkKey = "net.notifyInsecureNetwork"
     static let externalIPTTL: TimeInterval = 300
     /// Firewall + captive checks share this cache window across panel opens.
     static let statusTTL: TimeInterval = 60
@@ -148,7 +180,9 @@ public final class NetModule: EyrieModule {
         showWiFiDetails = defaults.object(forKey: Self.showWiFiDetailsKey) as? Bool ?? false
         showQuality = defaults.object(forKey: Self.showQualityKey) as? Bool ?? true
         showSecurityWarnings = defaults.object(forKey: Self.showSecurityWarningsKey) as? Bool ?? true
+        notifyInsecureNetwork = defaults.object(forKey: Self.notifyInsecureNetworkKey) as? Bool ?? false
         if let ssidProvider { hook(ssidProvider) }
+        // No syncNotifyMonitor() here on purpose — see `isModuleEnabled`.
     }
 
     /// Idempotent; called from the panel's onAppear. All fetching is driven by
@@ -188,6 +222,17 @@ public final class NetModule: EyrieModule {
         reachabilityTask = nil
         exposedServicesTask?.cancel()
         exposedServicesTask = nil
+        notifyTask?.cancel()
+        notifyTask = nil
+        hasWarnedForCurrentInsecureState = false
+    }
+
+    /// This is the one signal in NetKit that keeps working with the panel
+    /// closed, so a module the user switched off must not keep watching it.
+    public func setModuleEnabled(_ enabled: Bool) {
+        isModuleEnabled = enabled
+        if !enabled { shutdown() }
+        syncNotifyMonitor()
     }
 
     /// Synchronous state transition, injectable from tests.
@@ -374,6 +419,55 @@ public final class NetModule: EyrieModule {
             exposedServicesTask = nil
             refreshSecurityFindings()
         }
+    }
+
+    // MARK: - Insecure network notifications
+
+    /// Starts or stops the background monitor to match the toggle and the
+    /// module's enabled state. Idempotent, called from both.
+    private func syncNotifyMonitor() {
+        guard notifyInsecureNetwork, isModuleEnabled else {
+            notifyTask?.cancel()
+            notifyTask = nil
+            hasWarnedForCurrentInsecureState = false
+            return
+        }
+        guard notifyTask == nil else { return }
+        notifyTask = Task { [weak self] in
+            guard let stream = self?.pathMonitor.snapshots() else { return }
+            for await snapshot in stream {
+                guard !Task.isCancelled else { return }
+                await self?.evaluateInsecureNetworkWarning(for: snapshot)
+            }
+        }
+    }
+
+    /// Deliberately reads Wi-Fi/VPN state itself rather than the panel's
+    /// published `wifiDetails`/`vpnStatus` — those are only populated while
+    /// the panel monitor is running, but this must work with it closed.
+    private func evaluateInsecureNetworkWarning(for snapshot: NetworkSnapshot) async {
+        guard snapshot.kind == .wifi, let interfaceName = snapshot.interfaceName else {
+            hasWarnedForCurrentInsecureState = false
+            return
+        }
+        let wifi = resolvedSSIDProvider().currentWiFiDetails()
+        let vpn = vpnProvider.currentStatus(primaryInterface: interfaceName)
+        guard InsecureNetworkNotifier.shouldWarn(wifi: wifi, vpn: vpn) else {
+            hasWarnedForCurrentInsecureState = false
+            return
+        }
+        guard !hasWarnedForCurrentInsecureState else { return }
+        hasWarnedForCurrentInsecureState = true
+        guard let wifi else { return }
+        let (title, body) = Self.insecureNetworkMessage(for: wifi)
+        await NotificationService.shared.send(title: title, body: body)
+    }
+
+    private static func insecureNetworkMessage(for wifi: WiFiDetails) -> (title: String, body: String) {
+        if wifi.isOpenNetwork {
+            return ("Insecure network", "This network is unencrypted and no VPN is active.")
+        }
+        return ("Insecure network", "\(wifi.securityLabel) encryption is broken and no VPN is active.")
     }
 
     private func refreshExternalIPIfNeeded() {

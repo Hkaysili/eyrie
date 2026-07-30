@@ -31,6 +31,17 @@ public struct SecurityFinding: Sendable, Equatable, Identifiable {
     }
 }
 
+/// Pure: decides whether an insecure-network notification should fire.
+/// Wi-Fi only, and deliberately independent of `NetworkTrust` — captive-portal
+/// untrust comes from an async, TTL-cached probe, but this check must be safe
+/// to call synchronously from a background path-monitor callback.
+public enum InsecureNetworkNotifier {
+    public static func shouldWarn(wifi: WiFiDetails?, vpn: VPNStatus?) -> Bool {
+        guard let wifi, wifi.isOpenNetwork || wifi.isWeakSecurity else { return false }
+        return vpn?.isActive != true
+    }
+}
+
 /// Pure: turns the signals the module already collects into a short, ordered
 /// list of things the user can act on. Same data, different urgency depending
 /// on whether the network is trusted.

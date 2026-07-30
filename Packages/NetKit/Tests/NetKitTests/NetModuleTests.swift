@@ -74,6 +74,72 @@ struct NetModuleTests {
         #expect(module.isFetchingExternalIP == false)
     }
 
+    // MARK: - Insecure network notification monitor
+
+    @Test func notifyMonitorStartsOnlyWhenEnabledAndToggledOn() {
+        let monitor = ScriptedMonitor()
+        let module = NetModule(
+            pathMonitor: monitor,
+            externalIPFetcher: ScriptedFetcher(),
+            ssidProvider: StubSSIDProvider(status: .authorized),
+            defaults: temporaryDefaults()
+        )
+        module.notifyInsecureNetwork = true
+        #expect(monitor.streamCount == 0)
+        #expect(module.notifyTask == nil)
+        module.setModuleEnabled(true)
+        #expect(module.notifyTask != nil)
+    }
+
+    @Test func disabledModuleNeverStartsNotifyMonitorEvenIfToggledOn() {
+        let monitor = ScriptedMonitor()
+        let module = NetModule(
+            pathMonitor: monitor,
+            externalIPFetcher: ScriptedFetcher(),
+            ssidProvider: StubSSIDProvider(status: .authorized),
+            defaults: temporaryDefaults()
+        )
+        module.notifyInsecureNetwork = true
+        module.setModuleEnabled(false)
+        #expect(monitor.streamCount == 0)
+        #expect(module.notifyTask == nil)
+    }
+
+    @Test func notifyMonitorStopsOnToggleOffAndRestartsFresh() {
+        let monitor = ScriptedMonitor()
+        let module = NetModule(
+            pathMonitor: monitor,
+            externalIPFetcher: ScriptedFetcher(),
+            ssidProvider: StubSSIDProvider(status: .authorized),
+            defaults: temporaryDefaults()
+        )
+        module.setModuleEnabled(true)
+        module.notifyInsecureNetwork = true
+        #expect(module.notifyTask != nil)
+
+        module.notifyInsecureNetwork = false
+        #expect(module.notifyTask == nil)
+
+        module.notifyInsecureNetwork = true
+        #expect(module.notifyTask != nil)
+    }
+
+    @Test func disablingModuleStopsNotifyMonitor() {
+        let monitor = ScriptedMonitor()
+        let module = NetModule(
+            pathMonitor: monitor,
+            externalIPFetcher: ScriptedFetcher(),
+            ssidProvider: StubSSIDProvider(status: .authorized),
+            defaults: temporaryDefaults()
+        )
+        module.setModuleEnabled(true)
+        module.notifyInsecureNetwork = true
+        #expect(module.notifyTask != nil)
+
+        module.setModuleEnabled(false)
+        #expect(module.notifyTask == nil)
+    }
+
     // MARK: - SSID gating
 
     @Test func deniedAuthorizationNeverExposesSSID() {

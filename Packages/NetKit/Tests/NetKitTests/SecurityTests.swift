@@ -79,6 +79,32 @@ struct NetworkTrustTests {
     }
 }
 
+struct InsecureNetworkNotifierTests {
+    @Test func openNetworkWithNoVPNShouldWarn() {
+        #expect(InsecureNetworkNotifier.shouldWarn(wifi: stubWiFiDetails(isOpen: true), vpn: nil))
+    }
+
+    @Test func weakEncryptionWithNoVPNShouldWarn() {
+        #expect(InsecureNetworkNotifier.shouldWarn(wifi: stubWiFiDetails(weak: true), vpn: VPNStatus()))
+    }
+
+    @Test func activeVPNSilencesTheWarning() {
+        let vpn = VPNStatus(services: [VPNServiceInfo(serviceID: "a", name: "Work VPN", isConnected: true)])
+        #expect(!InsecureNetworkNotifier.shouldWarn(wifi: stubWiFiDetails(isOpen: true), vpn: vpn))
+    }
+
+    @Test func secureNetworkNeverWarns() {
+        #expect(!InsecureNetworkNotifier.shouldWarn(wifi: stubWiFiDetails(), vpn: nil))
+    }
+
+    @Test func missingWiFiDetailsNeverWarns() {
+        // No Wi-Fi details (Ethernet, unauthorized Location, or redacted
+        // CoreWLAN state) is not evidence of danger — same definitive-only
+        // rule as NetworkTrust.
+        #expect(!InsecureNetworkNotifier.shouldWarn(wifi: nil, vpn: nil))
+    }
+}
+
 struct SecurityAdvisorTests {
     private let airplay = [ExposedService(port: 7000, name: "AirPlay Receiver")]
 
