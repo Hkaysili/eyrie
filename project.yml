@@ -42,8 +42,8 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Eyrie
-        CFBundleShortVersionString: "0.3.0"
-        CFBundleVersion: "3"
+        CFBundleShortVersionString: "0.4.0"
+        CFBundleVersion: "4"
         LSUIElement: true
         LSApplicationCategoryType: public.app-category.utilities
         NSLocationUsageDescription: Eyrie uses your location permission only to read the current Wi-Fi network name.
