@@ -22,9 +22,17 @@ struct LiveProviderSmokeTests {
         try await Task.sleep(for: .milliseconds(500))
         let second = try provider.sample()
 
+        #expect(second.uptime > first.uptime)
+
         let snapshot = MetricsMath.snapshot(id: 1, previous: first, current: second, interval: 1)
-        let cpu = try #require(snapshot.cpuTotal)
-        #expect(cpu >= 0 && cpu <= 1)
+        // A CPU rate is not something the machine guarantees: virtualized CI
+        // hosts have returned two HOST_CPU_LOAD_INFO reads with identical
+        // counters across this window, and nil is the correct answer there
+        // (see MetricsMathTests.zeroTotalTicksGivesNilCPU). Check the range
+        // when we got a rate; never require that we did.
+        if let cpu = snapshot.cpuTotal {
+            #expect(cpu >= 0 && cpu <= 1)
+        }
         if let down = snapshot.downBytesPerSecond, let up = snapshot.upBytesPerSecond {
             #expect(down >= 0)
             #expect(up >= 0)
