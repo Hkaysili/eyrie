@@ -1,47 +1,46 @@
 #!/usr/bin/env sh
 
 # Commit message validation + automatic emoji prefix by pattern (see CONTRIBUTING.md)
-# Pattern -> emoji: [feature/Eyrie-x] ✨ | [bugfix/Eyrie-x] 🐞 | [hotfix/Eyrie-x] 🚨 | Refactor: 🔨 | Update: 🔄 | Merge 🔀
-
-# Force a UTF-8 locale so the Turkish-character check matches characters, not emoji bytes
-export LC_ALL="${LC_ALL:-en_US.UTF-8}"
+# Pattern -> emoji: [feature/Eyrie-x] ✨ | [bugfix/Eyrie-x] 🐞 | [hotfix/Eyrie-x] 🚨 |
+#                   Refactor: 🔨 | Update: 🔄 | git-generated Merge 🔀 | Revert ⏪
+# fixup!/squash! subjects pass through untouched so rebase --autosquash keeps matching.
 
 MSG_FILE="$1"
+root="$(git rev-parse --show-toplevel)" || exit 1
 first_line="$(head -n 1 "$MSG_FILE")"
 
 case "$first_line" in
-  "✨ "*|"🐞 "*|"🚨 "*|"🔨 "*|"🔄 "*|"🔀 "*) emoji="" ;;
+  "✨ "*|"🐞 "*|"🚨 "*|"🔨 "*|"🔄 "*|"🔀 "*|"⏪ "*) emoji="" ;;
   "[feature/Eyrie-"*) emoji="✨" ;;
   "[bugfix/Eyrie-"*)  emoji="🐞" ;;
   "[hotfix/Eyrie-"*)  emoji="🚨" ;;
   "[Eyrie-"*)         emoji="✨" ;;
   "Refactor: "*)      emoji="🔨" ;;
   "Update: "*)        emoji="🔄" ;;
-  "Merge "*)          emoji="🔀" ;;
+  "Merge branch "*|"Merge remote-tracking branch "*|"Merge tag "*|"Merge pull request "*) emoji="🔀" ;;
+  'Revert "'*)        emoji="⏪" ;;
   *) emoji="" ;;
+esac
+
+candidate="$first_line"
+[ -n "$emoji" ] && candidate="$emoji $first_line"
+
+echo '⏳... START COMMIT MESSAGE CHECKING ... ⏳'
+
+# Validate before touching the file so a rejected message is never rewritten.
+sh "$root/Scripts/validate-commit-subject.sh" "$candidate"
+case $? in
+  0) ;;
+  2) echo "❌ ERROR:: Commit subject must be written in ENGLISH (Turkish characters detected): $first_line" >&2
+     exit 1 ;;
+  *) echo "❌ ERROR:: Your commit message is missing a valid format like '[feature/Eyrie-XX]: message', '[bugfix/Eyrie-XX]: message', '[hotfix/Eyrie-XX]: message', '[Eyrie-XX]: message', 'Refactor: message', or 'Update: message'" >&2
+     exit 1 ;;
 esac
 
 if [ -n "$emoji" ]; then
   tmp="$MSG_FILE.tmp"
-  { printf '%s %s\n' "$emoji" "$first_line"; tail -n +2 "$MSG_FILE"; } > "$tmp" && mv "$tmp" "$MSG_FILE"
-  first_line="$(head -n 1 "$MSG_FILE")"
-  echo "🎨 Emoji prefix added: $first_line"
+  { printf '%s\n' "$candidate"; tail -n +2 "$MSG_FILE"; } > "$tmp" && mv "$tmp" "$MSG_FILE"
+  echo "🎨 Emoji prefix added: $candidate"
 fi
 
-commit_regex="^(✨|🐞|🚨|🔨|🔄|🔀)? ?\[(feature/Eyrie-[0-9]{1,5}|bugfix/Eyrie-[0-9]{1,5}|hotfix/Eyrie-[0-9]{1,5}|Eyrie-[0-9]{1,5})\]: .+|^(✨|🐞|🚨|🔨|🔄|🔀)? ?(Refactor|Update): .+|^Merge .+|^(🔀) ?Merge .+"
-error_msg="Your commit message is missing a valid format like '[feature/Eyrie-XX]: message', '[bugfix/Eyrie-XX]: message', '[hotfix/Eyrie-XX]: message', '[Eyrie-XX]: message', 'Refactor: message', 'Update: message', or 'Merge message'"
-
-echo '⏳... START COMMIT MESSAGE CHECKING ... ⏳'
-
-if head -n 1 "$MSG_FILE" | grep -q '[çğıöşüÇĞİÖŞÜ]'; then
-  echo "❌ ERROR:: Commit subject must be written in ENGLISH (Turkish characters detected): $(head -n 1 "$MSG_FILE")" >&2
-  exit 1
-fi
-
-if ! head -n 1 "$MSG_FILE" | grep -iqE "$commit_regex"; then
-  echo "DEBUG: Commit message does not match - $(head -n 1 "$MSG_FILE")"
-  echo "❌ ERROR:: $error_msg" >&2
-  exit 1
-else
-  echo "🚀 COMMIT MESSAGE CHECK SUCCESSFUL 🚀" >&2
-fi
+echo "🚀 COMMIT MESSAGE CHECK SUCCESSFUL 🚀"

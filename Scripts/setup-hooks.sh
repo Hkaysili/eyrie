@@ -6,10 +6,11 @@
 #
 #   ./Scripts/setup-hooks.sh
 
-set -e
-cd "$(git rev-parse --show-toplevel)"
+root="$(git rev-parse --show-toplevel)" || exit 1
+cd "$root" || exit 1
 
-chmod +x .githooks/*
+# Zip/tarball downloads lose the executable bit git preserves, so restore it.
+chmod +x .githooks/* Scripts/*.sh
 git config core.hooksPath .githooks
 
 echo "✅ git hooks installed (core.hooksPath -> .githooks)"
