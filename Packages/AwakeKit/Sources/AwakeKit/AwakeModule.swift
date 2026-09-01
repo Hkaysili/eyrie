@@ -9,7 +9,13 @@ public final class AwakeModule: EyrieModule {
     public let name = "Keep Awake"
     public var symbolName: String { isActive ? "cup.and.heat.waves.fill" : "cup.and.heat.waves" }
 
-    public private(set) var isActive = false
+    public var isActive: Bool { isSessionActive || isSimulatingActivity }
+
+    /// Whether a keep-awake power assertion session is running.
+    public private(set) var isSessionActive = false
+    /// Whether the activity simulator's tick loop is running. Mirrors the
+    /// simulator so `@Observable` tracking sees the change.
+    public private(set) var isSimulatingActivity = false
     /// Nil while active means the session runs until manually stopped.
     public private(set) var sessionEndDate: Date?
 
@@ -25,21 +31,55 @@ public final class AwakeModule: EyrieModule {
         }
     }
 
+    /// Periodically nudges the pointer while the user is idle so chat apps
+    /// don't mark them away. Runs with the panel closed, so enable/disable
+    /// goes through `setModuleEnabled(_:)`, not view lifecycle.
+    public var simulateActivity: Bool {
+        didSet {
+            defaults.set(simulateActivity, forKey: Self.simulateActivityKey)
+            syncSimulator()
+            if simulateActivity, !ActivitySimulator.hasAccessibilityTrust {
+                ActivitySimulator.promptForAccessibilityTrust()
+            }
+        }
+    }
+
+    public var activityInterval: AwakeActivityInterval {
+        didSet {
+            defaults.set(activityInterval.rawValue, forKey: Self.activityIntervalKey)
+            simulator.interval = activityInterval.seconds
+        }
+    }
+
+    /// Whether synthetic events will actually be delivered; drives the
+    /// caution line in the panel.
+    public var hasAccessibilityTrust: Bool { ActivitySimulator.hasAccessibilityTrust }
+
     @ObservationIgnored private var sessionTask: Task<Void, Never>?
     @ObservationIgnored private let defaults = UserDefaults.standard
+    @ObservationIgnored private let simulator: ActivitySimulator
+    /// The registry calls `setModuleEnabled(_:)` at launch, so the simulator
+    /// stays parked until then even when the preference is on.
+    @ObservationIgnored private var isModuleEnabled = false
 
     private static let presetKey = "awake.preset"
     private static let displaySleepKey = "awake.allowDisplaySleep"
+    private static let simulateActivityKey = "awake.simulateActivity"
+    private static let activityIntervalKey = "awake.activityInterval"
 
     public init() {
         selectedPreset = AwakePreset(rawValue: defaults.integer(forKey: Self.presetKey)) ?? .indefinite
         allowDisplaySleep = defaults.bool(forKey: Self.displaySleepKey)
+        simulateActivity = defaults.bool(forKey: Self.simulateActivityKey)
+        let interval = AwakeActivityInterval(rawValue: defaults.integer(forKey: Self.activityIntervalKey)) ?? .minute1
+        activityInterval = interval
+        simulator = ActivitySimulator(interval: interval.seconds)
     }
 
     public func start() {
         sessionTask?.cancel()
         guard holdAssertion() else { return }
-        isActive = true
+        isSessionActive = true
 
         if let minutes = selectedPreset.minutes {
             let end = Date.now.addingTimeInterval(TimeInterval(minutes * 60))
@@ -58,7 +98,7 @@ public final class AwakeModule: EyrieModule {
         sessionTask?.cancel()
         sessionTask = nil
         sessionEndDate = nil
-        isActive = false
+        isSessionActive = false
         PowerAssertionService.shared.release(token: id)
     }
 
@@ -66,6 +106,24 @@ public final class AwakeModule: EyrieModule {
     /// keeps `pmset -g assertions` clean even if termination is slow.
     public func shutdown() {
         stop()
+        simulator.stop()
+        isSimulatingActivity = false
+    }
+
+    public func setModuleEnabled(_ enabled: Bool) {
+        isModuleEnabled = enabled
+        if !enabled { stop() }
+        syncSimulator()
+    }
+
+    private func syncSimulator() {
+        let shouldRun = simulateActivity && isModuleEnabled
+        if shouldRun, !simulator.isRunning {
+            simulator.start()
+        } else if !shouldRun, simulator.isRunning {
+            simulator.stop()
+        }
+        isSimulatingActivity = simulator.isRunning
     }
 
     @discardableResult

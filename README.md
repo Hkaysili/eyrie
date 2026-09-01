@@ -10,7 +10,7 @@ A modular macOS menu bar app built with SwiftUI and the macOS 26 (Tahoe) **Liqui
 
 | Module | What it does |
 |---|---|
-| **Keep Awake** (`AwakeKit`) | Prevents your Mac from sleeping — indefinitely or for a set duration, with optional display sleep |
+| **Keep Awake** (`AwakeKit`) | Prevents your Mac from sleeping — indefinitely or for a set duration, with optional display sleep. Can also simulate user activity on a period so chat apps (Teams, Slack, …) don't mark you away |
 | **Focus** (`FocusKit`) | Pomodoro timer with focus/break cycles, notifications, and a daily session counter |
 | **Audio Share** (`AudioShareKit`) | Plays audio on multiple Bluetooth devices simultaneously with per-device volume |
 | **Displays** (`DisplayKit`) | Controls external display brightness over DDC/CI |
@@ -125,7 +125,9 @@ That's the entire integration surface. Enable/disable, the settings tab, panel c
 ### AwakeKit
 Thin state machine over `PowerAssertionService`. The "allow display sleep" setting picks between `kIOPMAssertionTypePreventUserIdleSystemSleep` and `...PreventUserIdleDisplaySleep`. Timed sessions use a `Task.sleep` and release the assertion + notify on expiry.
 
-**Verify:** toggle it on, then `pmset -g assertions | grep Eyrie`.
+The **Simulate activity** switch (default off) runs `ActivitySimulator`: a periodic tick that checks the HID idle clock and, only when the user has been idle for the whole interval, posts a 1 pt synthetic mouse move-and-restore via `CGEvent` so presence-based apps (Teams, Slack, …) don't flip to away. It never fights real input, sleeps a full interval before the first nudge, and needs the Accessibility (TCC) grant — the panel shows a caution line and prompts while trust is missing. It runs with the panel closed, so `setModuleEnabled(_:)` stops/restores it and `shutdown()` kills it on quit.
+
+**Verify:** toggle it on, then `pmset -g assertions | grep Eyrie`. For Simulate activity: enable it, don't touch the mouse, and watch the pointer twitch 1 pt after the interval.
 
 ### FocusKit
 Pomodoro state machine: focus → short break, long break after every N focus sessions (`sessionsBeforeLongBreak`). A naturally finished phase parks in a *pending* state (`pendingPhase`) until the user starts the next one; only an explicit skip enters the next phase immediately. Pausing captures remaining seconds and cancels the phase task; resuming reschedules. The daily counter persists in `UserDefaults` keyed by ISO date.

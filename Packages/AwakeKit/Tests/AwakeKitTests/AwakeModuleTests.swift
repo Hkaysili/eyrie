@@ -27,6 +27,7 @@ struct AwakeModuleTests {
     private func makeModule() -> AwakeModule {
         let module = AwakeModule()
         module.stop() // known clean state regardless of persisted defaults
+        module.simulateActivity = false
         return module
     }
 
@@ -75,6 +76,63 @@ struct AwakeModuleTests {
         #expect(module.symbolName == "cup.and.heat.waves.fill")
         module.stop()
         #expect(module.symbolName == "cup.and.heat.waves")
+    }
+
+    @Test func simulatorWaitsForModuleEnable() {
+        let module = makeModule()
+        defer {
+            module.simulateActivity = false
+            module.setModuleEnabled(false)
+        }
+
+        module.simulateActivity = true
+        #expect(!module.isSimulatingActivity, "the registry hasn't enabled the module yet")
+
+        module.setModuleEnabled(true)
+        #expect(module.isSimulatingActivity)
+        #expect(module.isActive, "simulation alone must light up the menu bar icon")
+        #expect(!module.isSessionActive, "no power assertion session was started")
+
+        module.simulateActivity = false
+        #expect(!module.isSimulatingActivity)
+        #expect(!module.isActive)
+    }
+
+    @Test func disablingModuleStopsSimulatorAndReenableRestoresIt() {
+        let module = makeModule()
+        defer {
+            module.simulateActivity = false
+            module.setModuleEnabled(false)
+        }
+
+        module.setModuleEnabled(true)
+        module.simulateActivity = true
+        #expect(module.isSimulatingActivity)
+
+        module.setModuleEnabled(false)
+        #expect(!module.isSimulatingActivity)
+
+        module.setModuleEnabled(true)
+        #expect(module.isSimulatingActivity, "re-enable must restore the persisted preference")
+    }
+
+    @Test func shutdownStopsSimulator() {
+        let module = makeModule()
+        defer { module.simulateActivity = false }
+
+        module.setModuleEnabled(true)
+        module.simulateActivity = true
+        module.shutdown()
+        #expect(!module.isSimulatingActivity)
+    }
+
+    @Test func activityIntervalPersists() {
+        let module = makeModule()
+        defer { module.activityInterval = .minute1 }
+
+        module.activityInterval = .minutes5
+        let fresh = AwakeModule()
+        #expect(fresh.activityInterval == .minutes5)
     }
 
     @Test func togglingDisplaySleepWhileActiveKeepsAssertion() {
