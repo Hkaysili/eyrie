@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+
+# Test every package that has staged changes before it can be committed.
+# Commits touching only files outside Packages/ skip the sweep.
+
+set -e
+
+packages="$(git diff --cached --name-only --diff-filter=ACMRD \
+  | sed -n 's|^Packages/\([^/]*\)/.*|\1|p' | sort -u)"
+
+[ -z "$packages" ] && exit 0
+
+for pkg in $packages; do
+  echo "⏳ pre-commit: swift test --package-path Packages/$pkg"
+  swift test --package-path "Packages/$pkg" || {
+    echo "❌ ERROR:: tests failed for Packages/$pkg — commit aborted" >&2
+    exit 1
+  }
+done
+
+echo "🚀 pre-commit: package tests OK 🚀"

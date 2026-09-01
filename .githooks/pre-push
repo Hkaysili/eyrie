@@ -1,0 +1,14 @@
+#!/usr/bin/env sh
+
+# Verify the full package test sweep before anything reaches a remote.
+# Escape hatch for a known-broken unrelated package: git push --no-verify
+
+for pkg in Packages/*/; do
+  echo "⏳ pre-push: swift test --package-path $pkg"
+  swift test --package-path "$pkg" || {
+    echo "❌ ERROR:: tests failed for $pkg — push aborted" >&2
+    exit 1
+  }
+done
+
+echo "🚀 pre-push: full package sweep OK 🚀"
