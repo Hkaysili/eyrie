@@ -83,6 +83,37 @@ struct ActivitySimulatorTests {
         #expect(recorder.nudges == 0, "the loop must sleep before its first check")
     }
 
+    @Test func startPastThresholdStillSleepsFirst() async {
+        // The "already past the threshold" start path: wait clamps to 1 s,
+        // but nothing may fire before that sleep completes.
+        let (simulator, recorder) = makeSimulator()
+        recorder.idle = 3600
+        simulator.start()
+        defer { simulator.stop() }
+
+        await Task.yield()
+        #expect(recorder.nudges == 0, "even a clamped wait must elapse before the first nudge")
+    }
+
+    /// Regression from review: when the nudge cannot reset the idle clock
+    /// (Accessibility missing — posts silently dropped), the 1 s clamp must
+    /// not become the schedule. At most one attempt per threshold.
+    @Test func undeliveredNudgeDoesNotSpinTheLoop() async throws {
+        let recorder = SimulatorRecorder()
+        let start = Date()
+        // An idle clock that grows in real time and is never reset by nudging.
+        let simulator = ActivitySimulator(
+            interval: 5,
+            idleTime: { Date().timeIntervalSince(start) + 100 },
+            nudge: { recorder.nudges += 1 }
+        )
+        simulator.start()
+        defer { simulator.stop() }
+
+        try await Task.sleep(for: .seconds(3.2))
+        #expect(recorder.nudges == 1, "clamped first check fires once; the retry must wait a full threshold")
+    }
+
     @Test func allIntervalsHaveLabels() {
         for interval in AwakeActivityInterval.allCases {
             #expect(!interval.label.isEmpty)

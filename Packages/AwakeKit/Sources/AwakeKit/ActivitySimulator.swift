@@ -43,11 +43,16 @@ final class ActivitySimulator {
         guard !isRunning else { return }
         isRunning = true
         task = Task { [weak self] in
+            // After a nudge attempt, sleep a flat interval: nextWait() assumes
+            // the nudge reset the idle clock, and when it didn't (Accessibility
+            // not granted, posts dropped) the 1 s clamp would otherwise become
+            // the schedule and spin the loop at 1 Hz.
+            var justNudged = false
             while !Task.isCancelled {
-                guard let wait = self?.nextWait() else { return }
+                guard let wait = self.map({ justNudged ? $0.interval : $0.nextWait() }) else { return }
                 try? await Task.sleep(for: .seconds(wait))
-                guard !Task.isCancelled else { return }
-                self?.tick()
+                guard !Task.isCancelled, let self else { return }
+                justNudged = self.tick()
             }
         }
     }
@@ -65,9 +70,14 @@ final class ActivitySimulator {
     }
 
     /// One idle check; split from the loop so tests drive it synchronously.
-    func tick() {
+    /// Returns whether a nudge was attempted, so the loop can rate-limit to
+    /// one attempt per threshold even when delivery silently fails.
+    @discardableResult
+    func tick() -> Bool {
         onTick?()
-        if idleTime() >= interval { nudge() }
+        guard idleTime() >= interval else { return false }
+        nudge()
+        return true
     }
 
     // MARK: - System implementations
