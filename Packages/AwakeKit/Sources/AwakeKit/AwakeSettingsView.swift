@@ -11,12 +11,12 @@ struct AwakeSettingsView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Picker("Simulated activity interval", selection: $module.activityInterval) {
+            Picker("Nudge after this long without input", selection: $module.activityInterval) {
                 ForEach(AwakeActivityInterval.allCases) { interval in
                     Text(interval.label).tag(interval)
                 }
             }
-            Text("How often the pointer is nudged while Simulate activity is on and you haven't touched the mouse or keyboard.")
+            Text("While Simulate activity is on, the pointer is nudged once you've been idle this long — pick a value below your chat app's away timeout. The 1 pt nudge can briefly wake the cursor, e.g. flashing playback controls over fullscreen video.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

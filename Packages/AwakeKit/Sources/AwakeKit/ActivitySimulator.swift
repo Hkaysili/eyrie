@@ -2,20 +2,28 @@ import ApplicationServices
 import CoreGraphics
 import Foundation
 
-/// Posts a tiny synthetic mouse move on a fixed period while the user is
-/// genuinely idle, so presence-based apps (Teams, Slack, …) don't flip the
-/// user to "away" on a machine Keep Awake is holding open.
+/// Posts a tiny synthetic mouse move once the user has been idle for the
+/// configured threshold — and again every threshold while they stay idle — so
+/// presence-based apps (Teams, Slack, …) don't flip the user to "away" on a
+/// machine Keep Awake is holding open.
 ///
-/// A nudge fires only when the HID idle time covers the whole interval, so it
-/// never fights real input. The loop sleeps *before* the first check — enabling
-/// the switch must never move the pointer immediately, and tests rely on this
-/// to exercise start/stop without posting real events.
+/// The model is an idle threshold, not a fixed-period timer: each check is
+/// scheduled for the moment the HID idle clock can actually cross the
+/// threshold (`interval - idleTime()`), so the first nudge lands within a
+/// bounded delay of the user's last real input instead of drifting up to 2x.
+/// A nudge fires only when the idle time covers the whole threshold, so it
+/// never fights real input, and the loop always sleeps before the first
+/// check — enabling the switch never moves the pointer immediately.
 @MainActor
 final class ActivitySimulator {
     private(set) var isRunning = false
 
-    /// Seconds between checks; also the idle threshold that allows a nudge.
+    /// Idle threshold in seconds; also the re-nudge period while idle persists.
     var interval: TimeInterval
+
+    /// Called at the start of every tick, before the idle check — the module
+    /// uses it to re-poll the Accessibility grant while the loop is running.
+    var onTick: (@MainActor () -> Void)?
 
     private let idleTime: @MainActor () -> TimeInterval
     private let nudge: @MainActor () -> Void
@@ -36,8 +44,8 @@ final class ActivitySimulator {
         isRunning = true
         task = Task { [weak self] in
             while !Task.isCancelled {
-                guard let interval = self?.interval else { return }
-                try? await Task.sleep(for: .seconds(interval))
+                guard let wait = self?.nextWait() else { return }
+                try? await Task.sleep(for: .seconds(wait))
                 guard !Task.isCancelled else { return }
                 self?.tick()
             }
@@ -50,11 +58,16 @@ final class ActivitySimulator {
         isRunning = false
     }
 
+    /// Sleep until the idle clock can actually cross the threshold (never
+    /// less than 1 s, so a stuck idle clock can't turn this into a hot loop).
+    func nextWait() -> TimeInterval {
+        max(1, interval - idleTime())
+    }
+
     /// One idle check; split from the loop so tests drive it synchronously.
-    /// The 1 s grace keeps a nudge from being skipped when the timer fires
-    /// marginally before the idle clock catches up.
     func tick() {
-        if idleTime() >= interval - 1 { nudge() }
+        onTick?()
+        if idleTime() >= interval { nudge() }
     }
 
     // MARK: - System implementations
