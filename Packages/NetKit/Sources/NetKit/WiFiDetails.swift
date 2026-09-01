@@ -118,14 +118,17 @@ extension LiveSSIDProvider {
     }
 
     private static func phyLabel(_ mode: CWPHYMode) -> String {
-        switch mode {
+        // `CWPHYMode.mode11be` (kCWPHYMode11be = 7) is documented but missing
+        // from the MacOSX26.0 SDK enum; match the raw value so this compiles
+        // against both SDK generations.
+        if mode.rawValue == 7 { return "802.11be" }
+        return switch mode {
         case .mode11a: "802.11a"
         case .mode11b: "802.11b"
         case .mode11g: "802.11g"
         case .mode11n: "802.11n"
         case .mode11ac: "802.11ac"
         case .mode11ax: "802.11ax"
-        case .mode11be: "802.11be"
         case .modeNone: ""
         @unknown default: "Wi-Fi"
         }
